@@ -36,15 +36,17 @@ def extract_encodings(images):
             continue
 
         try:
+            # Ensure the image is 8-bit
             img = img.astype(np.uint8)
 
             if len(img.shape) == 2:
+                # Gray image -> RGB
                 img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
             elif img.shape[2] == 4:
-                
+                # RGBA image -> RGB
                 img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
             else:
-            
+                # Normal BGR -> RGB
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
             face_locations = face_recognition.face_locations(img)
