@@ -9,6 +9,7 @@ from sklearn.utils.multiclass import unique_labels
 
 app = Flask(__name__)
 
+# Load images and labels
 def load_dataset(folder_path):
     images, labels = [], []
     label_map = {}
@@ -26,18 +27,42 @@ def load_dataset(folder_path):
                 labels.append(i)
     return images, labels, label_map
 
+# Extract encodings from images
 def extract_encodings(images):
     encodings = []
     for img in images:
-        rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        face_locations = face_recognition.face_locations(rgb_img)
-        if len(face_locations) == 1:
-            encoding = face_recognition.face_encodings(rgb_img, face_locations)[0]
-            encodings.append(encoding)
-        else:
+        if img is None:
             encodings.append(None)
+            continue
+
+        try:
+            img = img.astype(np.uint8)
+
+            if len(img.shape) == 2:
+                img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+            elif img.shape[2] == 4:
+                
+                img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
+            else:
+            
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+            face_locations = face_recognition.face_locations(img)
+
+            if len(face_locations) == 1:
+                encoding = face_recognition.face_encodings(img, face_locations)[0]
+                encodings.append(encoding)
+            else:
+                encodings.append(None)
+
+        except Exception as e:
+            print(f"Error processing image: {e}")
+            encodings.append(None)
+
     return encodings
 
+
+# Filter out images without valid encodings
 def filter_valid_encodings(encodings, labels):
     filtered_encodings, filtered_labels = [], []
     for enc, label in zip(encodings, labels):
@@ -46,58 +71,64 @@ def filter_valid_encodings(encodings, labels):
             filtered_labels.append(label)
     return filtered_encodings, filtered_labels
 
+# Main face recognition and evaluation function
 def recognize_faces():
     output = []
 
-    output.append("Loading the training data...")
-    train_images, train_labels, label_map = load_dataset("dataset/train")
-    train_encodings = extract_encodings(train_images)
-    train_encodings, train_labels = filter_valid_encodings(train_encodings, train_labels)
-    output.append(f"{len(train_encodings)} valid face encodings found for training.")
+    try:
+        output.append("Loading the training data...")
+        train_images, train_labels, label_map = load_dataset("dataset/train")
+        train_encodings = extract_encodings(train_images)
+        train_encodings, train_labels = filter_valid_encodings(train_encodings, train_labels)
+        output.append(f"✅ {len(train_encodings)} valid face encodings found for training.")
 
-    if not train_encodings:
-        return "No valid face encodings found in training set."
+        if not train_encodings:
+            return "⚠️ No valid face encodings found in training set."
 
-    knn = KNeighborsClassifier(n_neighbors=1)
-    knn.fit(train_encodings, train_labels)
-    output.append("Training KNN classifier...")
+        knn = KNeighborsClassifier(n_neighbors=1)
+        knn.fit(train_encodings, train_labels)
+        output.append("✅ KNN Classifier trained successfully.")
 
-    output.append("Loading test data...")
-    test_images, test_labels, _ = load_dataset("dataset/test")
-    test_encodings = extract_encodings(test_images)
-    test_encodings, test_labels = filter_valid_encodings(test_encodings, test_labels)
-    output.append(f"{len(test_encodings)} valid face encodings found for testing.")
+        output.append("\nLoading test data...")
+        test_images, test_labels, _ = load_dataset("dataset/test")
+        test_encodings = extract_encodings(test_images)
+        test_encodings, test_labels = filter_valid_encodings(test_encodings, test_labels)
+        output.append(f"✅ {len(test_encodings)} valid face encodings found for testing.")
 
-    if not test_encodings:
-        return "No valid face encodings found in test set."
+        if not test_encodings:
+            return "⚠️ No valid face encodings found in test set."
 
-    output.append("Predicting and evaluating...")
-    predictions = knn.predict(test_encodings)
-    probabilities = knn.predict_proba(test_encodings)
+        output.append("\nPredicting and evaluating...")
+        predictions = knn.predict(test_encodings)
+        probabilities = knn.predict_proba(test_encodings)
 
-    output.append("\nMatched Results with Confidence:")
-    for idx, (pred_label, probs) in enumerate(zip(predictions, probabilities)):
-        try:
-            class_index = list(knn.classes_).index(pred_label)
-            confidence = probs[class_index] * 100
-            matched_name = label_map[pred_label]
-            output.append(f"Test Image {idx + 1}: Matched with {matched_name} ({confidence:.2f}% confidence)")
-        except ValueError:
-            output.append(f"Test Image {idx + 1}: Unknown person (No matching class found)")
+        output.append("\n🔎 Matched Results with Confidence:")
+        for idx, (pred_label, probs) in enumerate(zip(predictions, probabilities)):
+            try:
+                class_index = list(knn.classes_).index(pred_label)
+                confidence = probs[class_index] * 100
+                matched_name = label_map[pred_label]
+                output.append(f"Test Image {idx + 1}: Matched with **{matched_name}** ({confidence:.2f}% confidence)")
+            except ValueError:
+                output.append(f"Test Image {idx + 1}: ❌ Unknown person (No matching class found)")
 
-    output.append("\nThe Classification Report:")
-    labels_present = unique_labels(test_labels, predictions)
-    report = classification_report(
-        test_labels, predictions,
-        labels=labels_present,
-        target_names=[label_map[i] for i in labels_present],
-        zero_division=0
-    )
-    output.append(report)
-    output.append(f"Accuracy: {accuracy_score(test_labels, predictions) * 100:.2f}%")
+        output.append("\n📊 Classification Report:")
+        labels_present = unique_labels(test_labels, predictions)
+        report = classification_report(
+            test_labels, predictions,
+            labels=labels_present,
+            target_names=[label_map[i] for i in labels_present],
+            zero_division=0
+        )
+        output.append(f"```\n{report}\n```")
+        output.append(f"🎯 Accuracy: **{accuracy_score(test_labels, predictions) * 100:.2f}%**")
+
+    except Exception as e:
+        output.append(f"❌ Error: {str(e)}")
 
     return "\n".join(output)
 
+# Flask Route
 @app.route('/', methods=['GET', 'POST'])
 def index():
     result = None
@@ -105,5 +136,6 @@ def index():
         result = recognize_faces()
     return render_template('index1.html', result=result)
 
+# Run the App
 if __name__ == '__main__':
     app.run(debug=True)
